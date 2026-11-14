@@ -1,0 +1,20 @@
+const router=require('express').Router();
+const {body,validationResult}=require('express-validator');
+const db=require('../config/db'),{requireStudent}=require('../middleware/auth'),upload=require('../middleware/upload');
+router.use(requireStudent);
+const errors=(req,res,next)=>{const e=validationResult(req);if(!e.isEmpty())return res.status(400).json({message:'Please check complaint details.',errors:e.array()});next();};
+const shape=r=>({id:r.id,title:r.title,category:r.category,location:r.location,description:r.description,imageUrl:r.image_path,status:r.status,createdAt:r.created_at,updatedAt:r.updated_at});
+router.post('/',upload.single('image'),[body('title').trim().notEmpty().isLength({max:180}),body('category').trim().notEmpty().isLength({max:100}),body('location').trim().notEmpty().isLength({max:180}),body('description').trim().notEmpty()],errors,async(req,res,next)=>{
+ const c=await db.getConnection();try{const {title,category,location,description}=req.body;await c.beginTransaction();
+ const img=req.file?`/uploads/${req.file.filename}`:null;
+ const [r]=await c.execute('INSERT INTO complaints(student_id,title,category,location,description,image_path) VALUES(?,?,?,?,?,?)',[req.student.id,title,category,location,description,img]);
+ await c.execute("INSERT INTO complaint_updates(complaint_id,status,note,updated_by_role) VALUES(?,'Pending','Complaint submitted by student.','student')",[r.insertId]);
+ await c.commit();const [rows]=await db.execute('SELECT * FROM complaints WHERE id=? AND student_id=?',[r.insertId,req.student.id]);
+ res.status(201).json({message:'Complaint submitted successfully.',complaint:shape(rows[0])});
+ }catch(e){await c.rollback();next(e);}finally{c.release();}});
+router.get('/',async(req,res,next)=>{try{const [r]=await db.execute('SELECT * FROM complaints WHERE student_id=? ORDER BY created_at DESC',[req.student.id]);res.json({complaints:r.map(shape)});}catch(e){next(e);}});
+router.get('/:id',async(req,res,next)=>{try{const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({message:'Invalid complaint ID.'});
+ const [r]=await db.execute('SELECT * FROM complaints WHERE id=? AND student_id=? LIMIT 1',[id,req.student.id]);if(!r.length)return res.status(404).json({message:'Complaint not found.'});
+ const [timeline]=await db.execute('SELECT status,note,updated_by_role AS updatedBy,created_at AS createdAt FROM complaint_updates WHERE complaint_id=? ORDER BY created_at,id',[id]);
+ res.json({complaint:shape(r[0]),timeline});}catch(e){next(e);}});
+module.exports=router;

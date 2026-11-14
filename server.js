@@ -1,0 +1,11 @@
+require('dotenv').config();
+const express=require('express'),cors=require('cors'),path=require('path'),db=require('./config/db');
+const app=express(),port=Number(process.env.PORT||5000);
+app.use(cors({origin:process.env.CLIENT_ORIGIN?process.env.CLIENT_ORIGIN.split(',').map(x=>x.trim()):true}));
+app.use(express.json({limit:'1mb'}));app.use(express.urlencoded({extended:true}));
+app.use('/uploads',express.static(path.join(__dirname,'../uploads')));
+app.get('/api/health',async(_req,res)=>{try{await db.query('SELECT 1');res.json({status:'ok',message:'CampusCare API and database are running.'});}catch{res.status(503).json({status:'error',message:'API is running but database connection failed.'});}});
+app.use('/api/student/auth',require('./routes/auth.routes'));
+app.use('/api/student/complaints',require('./routes/complaints.routes'));
+app.use((err,_req,res,_next)=>{console.error(err);if(err.code==='LIMIT_FILE_SIZE')return res.status(400).json({message:'Image must be 5 MB or smaller.'});if(err.message&&err.message.startsWith('Only JPG'))return res.status(400).json({message:err.message});res.status(500).json({message:'Something went wrong on the server.'});});
+app.listen(port,()=>console.log(`CampusCare student backend running at http://localhost:${port}`));
